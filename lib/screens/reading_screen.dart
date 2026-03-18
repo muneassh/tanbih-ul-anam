@@ -8,8 +8,21 @@ import 'package:tanbihulanam/services/bookmark_service.dart';
 
 class ReadingScreen extends ConsumerStatefulWidget {
   final SalatModel salat;
+  final bool isInJuzView;
+  final List<SalatModel>? allSalawat;
+  final int? currentIndex;
+  final bool isFullScreen;
+  final VoidCallback? onToggleFullScreen;
 
-  const ReadingScreen({super.key, required this.salat});
+  const ReadingScreen({
+    super.key, 
+    required this.salat,
+    this.isInJuzView = false,
+    this.allSalawat,
+    this.currentIndex,
+    this.isFullScreen = false,
+    this.onToggleFullScreen,
+  });
 
   @override
   ConsumerState<ReadingScreen> createState() => _ReadingScreenState();
@@ -23,7 +36,9 @@ class _ReadingScreenState extends ConsumerState<ReadingScreen> {
   void initState() {
     super.initState();
     _checkBookmark();
-    _saveLastRead();
+    if (!widget.isInJuzView) {
+      _saveLastRead();
+    }
   }
 
   Future<void> _checkBookmark() async {
@@ -46,19 +61,25 @@ class _ReadingScreenState extends ConsumerState<ReadingScreen> {
       _isBookmarked = !_isBookmarked;
     });
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_isBookmarked ? 'تمت الإضافة إلى المفضلة' : 'تمت الإزالة من المفضلة'),
-        duration: const Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isBookmarked ? 'تمت الإضافة إلى المفضلة' : 'تمت الإزالة من المفضلة'),
+          duration: const Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _saveLastRead() async {
     final settings = ref.read(settingsProvider);
     if (settings.autoSaveLastRead) {
-      ref.read(lastReadProvider.notifier).state = widget.salat.id;
+      await ref.read(settingsProvider.notifier).updateLastRead(
+        widget.salat.juz,
+        widget.salat.page,
+        widget.salat.id,
+      );
     }
   }
 
@@ -77,301 +98,229 @@ ${widget.salat.arabic}
   TextStyle _getFontStyle(AppFont font, double size, {Color? color}) {
     switch (font) {
       case AppFont.amiri:
-        return GoogleFonts.amiri(fontSize: size, height: 1.8, color: color);
+        return GoogleFonts.amiri(fontSize: size, height: 1.5, color: color);
       case AppFont.noto:
-        return GoogleFonts.notoNaskhArabic(fontSize: size, height: 1.8, color: color);
+        return GoogleFonts.notoNaskhArabic(fontSize: size, height: 1.5, color: color);
       case AppFont.cairo:
-        return GoogleFonts.cairo(fontSize: size, height: 1.8, color: color);
+        return GoogleFonts.cairo(fontSize: size, height: 1.5, color: color);
       case AppFont.tajawal:
-        return GoogleFonts.tajawal(fontSize: size, height: 1.8, color: color);
+        return GoogleFonts.tajawal(fontSize: size, height: 1.5, color: color);
+      default:
+        return GoogleFonts.amiri(fontSize: size, height: 1.5, color: color);
     }
   }
 
   List<TextSpan> _buildHighlightedPrayerSpans(String text, TextStyle baseStyle) {
     List<TextSpan> spans = [];
-    String searchWord = 'محمد';
-    String symbol = 'ﷺ';
+    List<String> patterns = [
+      'محمد',
+      'مُحَمَّد',
+      'مُحَمَّدٍ',
+      'مُحَمَّدًا',
+      'مُحَمَّدَ',
+      'محمداً',
+      'محمدٍ',
+      'محمدًا',
+      'ﷺ',
+    ];
     
-    if (text.contains(searchWord)) {
-      List<String> parts = text.split(searchWord);
-      for (int i = 0; i < parts.length; i++) {
-        if (parts[i].isNotEmpty) {
-          // Check for ﷺ in this part
-          if (parts[i].contains(symbol)) {
-            List<String> symbolParts = parts[i].split(symbol);
-            for (int j = 0; j < symbolParts.length; j++) {
-              if (symbolParts[j].isNotEmpty) {
-                spans.add(TextSpan(
-                  text: symbolParts[j],
-                  style: baseStyle,
-                ));
-              }
-              if (j < symbolParts.length - 1 || parts[i].endsWith(symbol)) {
-                spans.add(TextSpan(
-                  text: symbol,
-                  style: baseStyle.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red,
-                  ),
-                ));
-              }
-            }
-          } else {
-            spans.add(TextSpan(
-              text: parts[i],
-              style: baseStyle,
-            ));
-          }
-        }
-        if (i < parts.length - 1 || text.endsWith(searchWord)) {
-          spans.add(TextSpan(
-            text: searchWord,
-            style: baseStyle.copyWith(
-              fontWeight: FontWeight.bold,
-              color: Colors.red,
-            ),
-          ));
+    String remainingText = text;
+    
+    while (remainingText.isNotEmpty) {
+      int earliestMatch = -1;
+      String earliestPattern = '';
+      
+      for (String pattern in patterns) {
+        int index = remainingText.indexOf(pattern);
+        if (index != -1 && (earliestMatch == -1 || index < earliestMatch)) {
+          earliestMatch = index;
+          earliestPattern = pattern;
         }
       }
-    } else if (text.contains(symbol)) {
-      List<String> parts = text.split(symbol);
-      for (int i = 0; i < parts.length; i++) {
-        if (parts[i].isNotEmpty) {
-          spans.add(TextSpan(
-            text: parts[i],
-            style: baseStyle,
-          ));
+      
+      if (earliestMatch == -1) {
+        if (remainingText.isNotEmpty) {
+          spans.add(TextSpan(text: remainingText, style: baseStyle));
         }
-        if (i < parts.length - 1 || text.endsWith(symbol)) {
-          spans.add(TextSpan(
-            text: symbol,
-            style: baseStyle.copyWith(
-              fontWeight: FontWeight.bold,
-              color: Colors.red,
-            ),
-          ));
-        }
+        break;
       }
-    } else {
+      
+      if (earliestMatch > 0) {
+        spans.add(TextSpan(
+          text: remainingText.substring(0, earliestMatch),
+          style: baseStyle,
+        ));
+      }
+      
       spans.add(TextSpan(
-        text: text,
-        style: baseStyle,
+        text: earliestPattern,
+        style: baseStyle.copyWith(
+          fontWeight: FontWeight.bold,
+          color: Colors.red,
+          fontSize: baseStyle.fontSize! * 1.1,
+        ),
       ));
+      
+      remainingText = remainingText.substring(earliestMatch + earliestPattern.length);
     }
-
+    
     return spans;
+  }
+
+  // Calculate how many salawat can fit on one page
+  int _getSalawatPerPage(double fontSize, double screenHeight) {
+    double lineHeight = fontSize * 1.5;
+    double availableHeight = screenHeight * (widget.isFullScreen ? 0.95 : 0.75);
+    int avgLinesPerSalat = 5;
+    double salatHeight = avgLinesPerSalat * lineHeight;
+    return (availableHeight / salatHeight).floor();
   }
 
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final screenSize = MediaQuery.of(context).size;
     
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'صفحة ${widget.salat.page}',
-          style: GoogleFonts.amiri(),
-        ),
-        backgroundColor: const Color(0xFF0A5C36),
-        foregroundColor: Colors.white,
-        actions: [
-          // Bookmark button
-          IconButton(
-            icon: Icon(
-              _isBookmarked ? Icons.bookmark : Icons.bookmark_border,
-              color: Colors.white,
-            ),
-            onPressed: _isLoading ? null : _toggleBookmark,
-          ),
-          // Share button
-          IconButton(
-            icon: const Icon(Icons.share, color: Colors.white),
-            onPressed: _shareText,
-          ),
-          // Font size controls
-          IconButton(
-            icon: const Icon(Icons.text_decrease),
-            onPressed: () {
-              if (settings.fontSize > 16) {
-                ref.read(settingsProvider.notifier).setFontSize(settings.fontSize - 2);
-              }
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.text_increase),
-            onPressed: () {
-              if (settings.fontSize < 32) {
-                ref.read(settingsProvider.notifier).setFontSize(settings.fontSize + 2);
-              }
-            },
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          color: settings.isDarkMode 
-              ? const Color(0xFF121212) 
-              : const Color(0xFFFDF5E6),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SingleChildScrollView(
+    // In full screen mode with multiple salawat available
+    if (widget.isFullScreen && widget.allSalawat != null && widget.currentIndex != null) {
+      int salawatPerPage = _getSalawatPerPage(settings.fontSize, screenSize.height);
+      salawatPerPage = salawatPerPage.clamp(1, 6); // Show 1-6 salawat per page
+      
+      int startIndex = widget.currentIndex!;
+      int endIndex = (startIndex + salawatPerPage).clamp(0, widget.allSalawat!.length);
+      
+      return Container(
+        color: settings.isDarkMode ? const Color(0xFF121212) : const Color(0xFFFDF5E6),
+        child: ListView.builder(
+          padding: const EdgeInsets.all(8),
+          itemCount: endIndex - startIndex,
+          itemBuilder: (context, index) {
+            final salat = widget.allSalawat![startIndex + index];
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: settings.isDarkMode 
+                    ? const Color(0xFF1E1E1E).withOpacity(0.9)
+                    : Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: settings.isDarkMode 
+                      ? Colors.white.withOpacity(0.1)
+                      : const Color(0xFF0A5C36).withOpacity(0.2),
+                ),
+              ),
               child: Column(
                 children: [
-                  // Decorative top border
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 2,
-                          color: settings.isDarkMode 
-                              ? Colors.white.withOpacity(0.3)
-                              : const Color(0xFF0A5C36).withOpacity(0.3),
+                  SelectableText.rich(
+                    TextSpan(
+                      children: _buildHighlightedPrayerSpans(
+                        salat.arabic,
+                        _getFontStyle(
+                          settings.selectedFont, 
+                          settings.fontSize - 2,
+                          color: settings.isDarkMode ? Colors.white70 : const Color(0xFF2C1810),
                         ),
-                        const SizedBox(width: 16),
-                        Icon(
-                          Icons.star,
-                          size: 16,
-                          color: settings.isDarkMode 
-                              ? Colors.white.withOpacity(0.5)
-                              : const Color(0xFF0A5C36).withOpacity(0.5),
-                        ),
-                        const SizedBox(width: 16),
-                        Container(
-                          width: 40,
-                          height: 2,
-                          color: settings.isDarkMode 
-                              ? Colors.white.withOpacity(0.3)
-                              : const Color(0xFF0A5C36).withOpacity(0.3),
-                        ),
-                      ],
+                      ),
                     ),
+                    textDirection: TextDirection.rtl,
+                    textAlign: TextAlign.center,
                   ),
-                  
-                  // Main prayer text with highlighted Muhammad
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: settings.isDarkMode 
-                          ? const Color(0xFF1E1E1E)
-                          : Colors.white.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: settings.isDarkMode 
-                            ? Colors.white.withOpacity(0.1)
-                            : const Color(0xFF0A5C36).withOpacity(0.2),
-                        width: 1,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(settings.isDarkMode ? 0.3 : 0.05),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: SelectableText.rich(
-                      TextSpan(
-                        children: _buildHighlightedPrayerSpans(
-                          widget.salat.arabic,
-                          _getFontStyle(
-                            settings.selectedFont, 
-                            settings.fontSize,
-                            color: settings.isDarkMode ? Colors.white70 : const Color(0xFF2C1810),
-                          ),
-                        ),
-                      ),
-                      textDirection: TextDirection.rtl,
-                      textAlign: TextAlign.center,
-                    ),
+                  // Page number only at the bottom of the screen, not per salawat
+                ],
+              ),
+            );
+          },
+        ),
+      );
+    }
+    
+    // Normal single salawat view
+    return Container(
+      color: settings.isDarkMode ? const Color(0xFF121212) : const Color(0xFFFDF5E6),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          children: [
+            // Only show app bar equivalent if not in Juz view
+            if (!widget.isInJuzView) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.pop(context),
                   ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Page number badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: settings.isDarkMode 
-                          ? const Color(0xFF0A5C36).withOpacity(0.3)
-                          : const Color(0xFF0A5C36).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(30),
-                      border: Border.all(
-                        color: settings.isDarkMode 
-                            ? Colors.white.withOpacity(0.1)
-                            : const Color(0xFF0A5C36).withOpacity(0.3),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.menu_book,
-                          size: 18,
-                          color: settings.isDarkMode ? Colors.white70 : const Color(0xFF0A5C36),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'الصفحة ${widget.salat.page}',
-                          style: GoogleFonts.amiri(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: settings.isDarkMode ? Colors.white70 : const Color(0xFF0A5C36),
-                          ),
-                        ),
-                      ],
-                    ),
+                  Text(
+                    'صفحة ${widget.salat.page}',
+                    style: GoogleFonts.amiri(fontSize: 18),
                   ),
-                  
-                  const SizedBox(height: 16),
-                  
-                  // Juz and Bab info
-                  if (widget.salat.bab.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Text(
-                        '${widget.salat.bab} • الجزء ${widget.salat.juz}',
-                        style: GoogleFonts.amiri(
-                          fontSize: 14,
-                          color: settings.isDarkMode ? Colors.grey[400] : Colors.grey[600],
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          _isBookmarked ? Icons.bookmark : Icons.bookmark_border,
                         ),
+                        onPressed: _isLoading ? null : _toggleBookmark,
                       ),
-                    ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Ad space
-                  Container(
-                    height: 60,
-                    margin: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: settings.isDarkMode 
-                          ? Colors.white.withOpacity(0.05)
-                          : Colors.black.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: settings.isDarkMode 
-                            ? Colors.white.withOpacity(0.1)
-                            : Colors.grey.withOpacity(0.2),
+                      IconButton(
+                        icon: const Icon(Icons.share),
+                        onPressed: _shareText,
                       ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      'AD SPACE',
-                      style: GoogleFonts.amiri(
-                        color: settings.isDarkMode ? Colors.grey[500] : Colors.grey[600],
-                        fontSize: 16,
-                      ),
-                    ),
+                    ],
                   ),
                 ],
               ),
+              const Divider(),
+            ],
+            
+            // Main content
+            Expanded(
+              child: SingleChildScrollView(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: settings.isDarkMode 
+                        ? const Color(0xFF1E1E1E)
+                        : Colors.white.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: SelectableText.rich(
+                    TextSpan(
+                      children: _buildHighlightedPrayerSpans(
+                        widget.salat.arabic,
+                        _getFontStyle(
+                          settings.selectedFont, 
+                          settings.fontSize,
+                          color: settings.isDarkMode ? Colors.white70 : const Color(0xFF2C1810),
+                        ),
+                      ),
+                    ),
+                    textDirection: TextDirection.rtl,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
             ),
-          ),
+            
+            // Page number - only once at bottom
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A5C36).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'الصفحة ${widget.salat.page}',
+                style: GoogleFonts.amiri(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF0A5C36),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
