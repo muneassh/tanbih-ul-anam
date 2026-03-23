@@ -12,12 +12,15 @@ dependencies:
   google_mobile_ads: ^5.1.0
   hive: ^2.2.3
   hive_flutter: ^1.1.0
+  path_provider: ^2.1.3
   provider: ^6.1.2
   google_fonts: ^6.2.1
   flutter_riverpod: ^2.5.1
-  path_provider: ^2.1.3
-  share_plus: ^10.0.0
-  package_info_plus: ^9.0.0
+  share_plus: 7.2.2
+  package_info_plus: ^5.0.1
+  # Add web support
+  flutter_web_plugins:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:

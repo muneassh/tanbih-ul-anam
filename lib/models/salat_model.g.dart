@@ -22,13 +22,14 @@ class SalatModelAdapter extends TypeAdapter<SalatModel> {
       bab: fields[2] as String,
       juz: fields[3] as int,
       page: fields[4] as int,
+      type: fields[5] as String,
     );
   }
 
   @override
   void write(BinaryWriter writer, SalatModel obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(6)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -38,7 +39,9 @@ class SalatModelAdapter extends TypeAdapter<SalatModel> {
       ..writeByte(3)
       ..write(obj.juz)
       ..writeByte(4)
-      ..write(obj.page);
+      ..write(obj.page)
+      ..writeByte(5)
+      ..write(obj.type);
   }
 
   @override

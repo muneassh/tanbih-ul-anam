@@ -3,20 +3,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart' as path_provider;
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'models/salat_model.dart';
 import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize Hive with a custom path
-  final appDocumentDir = await path_provider.getApplicationDocumentsDirectory();
-  Hive.init(appDocumentDir.path);
+  // Initialize Hive with appropriate directory based on platform
+  if (kIsWeb) {
+    // For web, use a different approach - Hive web uses IndexedDB
+    await Hive.initFlutter();
+  } else {
+    // For mobile, use application documents directory
+    final appDocumentDir = await path_provider.getApplicationDocumentsDirectory();
+    Hive.init(appDocumentDir.path);
+  }
   
   Hive.registerAdapter(SalatModelAdapter());
-  await Hive.openBox<SalatModel>('salawat'); // Pre-open the box
+  await Hive.openBox<SalatModel>('salawat');
+  await Hive.openBox('settings');
+  await Hive.openBox('bookmarks');
   
-  await MobileAds.instance.initialize();
+  // Initialize ads only on mobile
+  if (!kIsWeb) {
+    try {
+      await MobileAds.instance.initialize();
+    } catch (e) {
+      print('Ads initialization failed: $e');
+    }
+  }
   
   runApp(const ProviderScope(child: MyApp()));
 }

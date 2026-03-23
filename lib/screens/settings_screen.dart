@@ -149,7 +149,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           
           const SizedBox(height: 8),
           
-          // Font Size
+          // Font Size - FIXED
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -171,19 +171,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         icon: const Icon(Icons.remove_circle_outline),
                         onPressed: () {
                           if (settings.fontSize > 16) {
-                            ref.read(settingsProvider.notifier).setFontSize(settings.fontSize - 2);
+                            ref.read(settingsProvider.notifier).setFontSize(settings.fontSize - 1);
                           }
                         },
                       ),
                       Expanded(
                         child: Slider(
-                          value: settings.fontSize,
+                          value: settings.fontSize.clamp(16.0, 32.0),
                           min: 16,
                           max: 32,
-                          divisions: 8,
+                          divisions: 16,
                           activeColor: const Color(0xFF0A5C36),
                           onChanged: (value) {
-                            ref.read(settingsProvider.notifier).setFontSize(value);
+                            if (value >= 16 && value <= 32) {
+                              ref.read(settingsProvider.notifier).setFontSize(value);
+                            }
                           },
                         ),
                       ),
@@ -191,7 +193,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         icon: const Icon(Icons.add_circle_outline),
                         onPressed: () {
                           if (settings.fontSize < 32) {
-                            ref.read(settingsProvider.notifier).setFontSize(settings.fontSize + 2);
+                            ref.read(settingsProvider.notifier).setFontSize(settings.fontSize + 1);
                           }
                         },
                       ),
@@ -246,6 +248,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               activeColor: const Color(0xFF0A5C36),
               onChanged: (value) {
                 ref.read(settingsProvider.notifier).setEnableNotifications(value);
+              },
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Flip Animation
+          Card(
+            child: SwitchListTile(
+              title: Text(
+                _getLocalizedText('حركة التقليب', 'Flip Animation'),
+                style: GoogleFonts.amiri(fontSize: 18),
+              ),
+              subtitle: Text(
+                _getLocalizedText('تفعيل تأثير تقليب الصفحات', 'Enable page flip effect'),
+                style: GoogleFonts.amiri(fontSize: 14, color: Colors.grey[600]),
+              ),
+              value: settings.enableFlipAnimation,
+              activeColor: const Color(0xFF0A5C36),
+              onChanged: (value) {
+                ref.read(settingsProvider.notifier).setEnableFlipAnimation(value);
               },
             ),
           ),
@@ -325,25 +348,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   
                   const Divider(),
                   
-                  // Content
-                  _buildAboutItem(
-                    Icons.menu_book,
-                    _getLocalizedText('المحتوى', 'Content'),
-                    _getLocalizedText(
-                      'جزءان رئيسيان + خاتمة، أبواب متعددة',
-                      '2 Main parts + Conclusion, Multiple chapters',
-                    ),
-                  ),
-                  
-                  const Divider(),
-                  
                   // Features
                   _buildAboutItem(
                     Icons.stars,
                     _getLocalizedText('المميزات', 'Features'),
                     _getLocalizedText(
-                      '• واجهة عربية أنيقة\n• خطوط متعددة\n• وضع ليلي\n• إشارات مرجعية\n• مشاركة النصوص\n• حفظ آخر قراءة\n• بحث متقدم',
-                      '• Beautiful Arabic UI\n• Multiple fonts\n• Dark mode\n• Bookmarks\n• Share text\n• Save last read\n• Advanced search',
+                      '• واجهة عربية أنيقة\n• خطوط متعددة\n• وضع ليلي\n• إشارات مرجعية\n• مشاركة النصوص\n• حفظ آخر قراءة\n• بحث متقدم\n• تقليب الصفحات بشكل كتاب',
+                      '• Beautiful Arabic UI\n• Multiple fonts\n• Dark mode\n• Bookmarks\n• Share text\n• Save last read\n• Advanced search\n• Book-like page flip',
                     ),
                   ),
                   
@@ -373,6 +384,59 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Reset Settings Button
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.restore, color: Colors.red),
+              title: Text(
+                _getLocalizedText('إعادة تعيين الإعدادات', 'Reset Settings'),
+                style: GoogleFonts.amiri(
+                  fontSize: 16,
+                  color: Colors.red,
+                ),
+              ),
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text(
+                      _getLocalizedText('تأكيد', 'Confirm'),
+                      style: GoogleFonts.amiri(),
+                    ),
+                    content: Text(
+                      _getLocalizedText(
+                        'هل أنت متأكد من إعادة تعيين جميع الإعدادات؟',
+                        'Are you sure you want to reset all settings?',
+                      ),
+                      style: GoogleFonts.amiri(),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(
+                          _getLocalizedText('إلغاء', 'Cancel'),
+                          style: GoogleFonts.amiri(),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          ref.read(settingsProvider.notifier).resetToDefaults();
+                          Navigator.pop(context);
+                        },
+                        child: Text(
+                          _getLocalizedText('تأكيد', 'Confirm'),
+                          style: GoogleFonts.amiri(color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ],

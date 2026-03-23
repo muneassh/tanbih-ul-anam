@@ -11,7 +11,7 @@
 
     <!-- Flutter embedding v2 requirement -->
     <application
-        android:label="تنبيه الأنام Tanbih al anam"
+        android:label="Tanbihu al anamتنبيه الأنام "
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
@@ -48,7 +48,7 @@
         <!-- Use TEST App ID during development (shows fake ads, no revenue) -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
+            android:value="ca-app-pub-8891897633102231~2923488560"/>
 
         <!-- When ready for production: replace with YOUR real AdMob App ID -->
         <!-- <meta-data

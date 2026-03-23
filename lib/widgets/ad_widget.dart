@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AdSpace extends StatefulWidget {
   final double height;
@@ -22,23 +23,30 @@ class _AdSpaceState extends State<AdSpace> {
   @override
   void initState() {
     super.initState();
-    _loadAd();
+    // Only load ads on mobile platforms
+    if (!kIsWeb) {
+      _loadAd();
+    }
   }
 
   void _loadAd() {
     _bannerAd = BannerAd(
       adUnitId: widget.useTestAd 
           ? 'ca-app-pub-3940256099942544/6300978111' // Test ID
-          : 'YOUR_REAL_AD_UNIT_ID', // Replace with real ID
+          : 'ca-app-pub-8891897633102231/2923488560', // Your real ad ID
       size: AdSize(height: widget.height.toInt(), width: 320),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
-          setState(() => _isAdLoaded = true);
+          if (mounted) {
+            setState(() => _isAdLoaded = true);
+          }
         },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
           debugPrint('Ad failed to load: $error');
-          setState(() => _isAdLoaded = false);
+          if (mounted) {
+            setState(() => _isAdLoaded = false);
+          }
         },
       ),
       request: const AdRequest(),
@@ -53,6 +61,15 @@ class _AdSpaceState extends State<AdSpace> {
 
   @override
   Widget build(BuildContext context) {
+    // On web, just return an empty container (no ads)
+    if (kIsWeb) {
+      return Container(
+        height: widget.height,
+        margin: const EdgeInsets.symmetric(vertical: 4),
+      );
+    }
+    
+    // On mobile, show ad if loaded
     if (_isAdLoaded && _bannerAd != null) {
       return Container(
         width: double.infinity,
@@ -61,7 +78,7 @@ class _AdSpaceState extends State<AdSpace> {
         child: AdWidget(ad: _bannerAd!),
       );
     } else {
-      // Empty container when ad not loaded - no "AD SPACE" text
+      // Empty container when ad not loaded
       return Container(
         height: widget.height,
         margin: const EdgeInsets.symmetric(vertical: 4),

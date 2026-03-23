@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 
 import 'juz_screen.dart';
 import 'settings_screen.dart';
@@ -19,19 +20,61 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStateMixin {
   BannerAd? _bannerAd;
   bool _isBannerAdLoaded = false;
+  
+  // Prayer times data (in order)
+  final List<Map<String, String>> _prayerTimes = [
+    {'ar': 'الفجر', 'en': 'Fajr', 'time': '05:12'},
+    {'ar': 'الشروق', 'en': 'Sunrise', 'time': '06:22'},
+    {'ar': 'الظهر', 'en': 'Dhuhr', 'time': '12:25'},
+    {'ar': 'العصر', 'en': 'Asr', 'time': '15:45'},
+    {'ar': 'المغرب', 'en': 'Maghrib', 'time': '18:30'},
+    {'ar': 'العشاء', 'en': 'Isha', 'time': '19:45'},
+  ];
+  
+  // Track which prayer is currently active
+  String? _activePrayer;
+  String? _upcomingPrayer;
+  int? _upcomingMinutes;
+  Timer? _timer;
+  late AnimationController _blinkController;
+  late Animation<double> _blinkAnimation;
 
   @override
   void initState() {
     super.initState();
     _loadBannerAd();
+    
+    // Initialize blinking animation for active prayer
+    _blinkController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+    
+    _blinkAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(parent: _blinkController, curve: Curves.easeInOut),
+    );
+    
+    // Check prayer times every 30 seconds
+    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _checkPrayerTimes();
+    });
+    _checkPrayerTimes(); // Initial check
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    _timer?.cancel();
+    _blinkController.dispose();
+    super.dispose();
   }
 
   void _loadBannerAd() {
     _bannerAd = BannerAd(
-      adUnitId: 'ca-app-pub-3940256099942544/6300978111',
+      adUnitId: 'ca-app-pub-8891897633102231/2923488560',
       size: AdSize.banner,
       listener: BannerAdListener(
         onAdLoaded: (ad) {
@@ -46,10 +89,121 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     )..load();
   }
 
-  @override
-  void dispose() {
-    _bannerAd?.dispose();
-    super.dispose();
+  int _getMinutesFromTime(String time) {
+    final parts = time.split(':');
+    return int.parse(parts[0]) * 60 + int.parse(parts[1]);
+  }
+
+  void _checkPrayerTimes() {
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    
+    // Find current prayer (active within 30 minutes after its time)
+    String? activePrayer;
+    for (var prayer in _prayerTimes) {
+      final prayerTime = prayer['time']!;
+      final prayerMinutes = _getMinutesFromTime(prayerTime);
+      
+      // Prayer is active for 30 minutes after its time
+      if (currentMinutes >= prayerMinutes && currentMinutes < prayerMinutes + 30) {
+        activePrayer = prayer['en'];
+        break;
+      }
+    }
+    
+    // Find next upcoming prayer (within 15 minutes)
+    String? upcomingPrayer;
+    int? upcomingMinutes;
+    
+    for (var prayer in _prayerTimes) {
+      final prayerTime = prayer['time']!;
+      final prayerMinutes = _getMinutesFromTime(prayerTime);
+      
+      // Only consider future prayers
+      if (prayerMinutes > currentMinutes) {
+        final diff = prayerMinutes - currentMinutes;
+        if (diff <= 15) {
+          upcomingPrayer = prayer['en'];
+          upcomingMinutes = diff;
+          break;
+        }
+      }
+    }
+    
+    // Handle midnight case (next day's Fajr)
+    if (upcomingPrayer == null) {
+      final firstPrayerMinutes = _getMinutesFromTime(_prayerTimes[0]['time']!);
+      final diff = (firstPrayerMinutes + 24 * 60) - currentMinutes;
+      if (diff <= 15) {
+        upcomingPrayer = _prayerTimes[0]['en'];
+        upcomingMinutes = diff;
+      }
+    }
+    
+    // Update state if changed
+    if (activePrayer != _activePrayer) {
+      setState(() {
+        _activePrayer = activePrayer;
+      });
+      
+      if (activePrayer != null) {
+        _showPrayerNotification(activePrayer, 'started');
+      }
+    }
+    
+    if (upcomingPrayer != _upcomingPrayer || upcomingMinutes != _upcomingMinutes) {
+      setState(() {
+        _upcomingPrayer = upcomingPrayer;
+        _upcomingMinutes = upcomingMinutes;
+      });
+      
+      if (upcomingPrayer != null && upcomingMinutes != null && upcomingMinutes <= 5) {
+        _showPrayerNotification(upcomingPrayer, 'upcoming', upcomingMinutes);
+      }
+    }
+  }
+
+  void _showPrayerNotification(String prayer, String type, [int? minutes]) {
+    // Find prayer data
+    final prayerData = _prayerTimes.firstWhere(
+      (p) => p['en'] == prayer,
+      orElse: () => {'ar': prayer, 'en': prayer},
+    );
+    
+    final settings = ref.read(settingsProvider);
+    final name = settings.language == AppLanguage.arabic ? prayerData['ar']! : prayerData['en']!;
+    
+    String message;
+    Color backgroundColor;
+    
+    if (type == 'started') {
+      message = 'حان الآن وقت صلاة $name';
+      backgroundColor = Colors.green;
+    } else {
+      message = 'متبقي $minutes دقيقة على صلاة $name';
+      backgroundColor = Colors.orange;
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(type == 'started' ? Icons.access_time : Icons.timer, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: GoogleFonts.amiri(fontSize: 14),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: backgroundColor,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   String _getLocalizedText(String ar, String en) {
@@ -61,11 +215,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
     
     return Scaffold(
       body: Stack(
         children: [
+          // Full-screen background
           Positioned.fill(
             child: Image.asset(
               'assets/images/landscape.png',
@@ -75,22 +229,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
           ),
+          
+          // Subtle dark overlay
           Positioned.fill(
             child: Container(
               color: Colors.black.withOpacity(0.20),
             ),
           ),
+          
           SafeArea(
             child: Column(
               children: [
-                // Top bar - FIXED HEIGHT OVERFLOW
+                // Top bar
                 Container(
                   height: 48,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Left icons
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -151,7 +307,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                       ),
                       
-                      // Right icons
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -195,8 +350,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ],
                   ),
                 ),
-
-                // Resume reading button - goes to exact page
+                
+                // Resume reading button
                 if (settings.lastReadSalatId != null && settings.lastReadPage > 0)
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
@@ -216,15 +371,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       icon: const Icon(Icons.history, color: Colors.white, size: 14),
                       label: Text(
                         _getLocalizedText(
-                          'صفحة ${settings.lastReadPage}',
-                          'Page ${settings.lastReadPage}',
+                          'الجزء ${settings.lastReadJuz} - صفحة ${settings.lastReadPage}',
+                          'Part ${settings.lastReadJuz} - Page ${settings.lastReadPage}',
                         ),
                         style: GoogleFonts.amiri(fontSize: 12),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0A5C36).withOpacity(0.8),
                         foregroundColor: Colors.white,
-                        minimumSize: const Size(120, 30),
+                        minimumSize: const Size(140, 30),
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
@@ -232,13 +387,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                     ),
                   ),
-
+                
                 const Spacer(flex: 1),
-
-                // Prayer times bar
+                
+                // Prayer times bar with highlighting
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 12),
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.50),
                     borderRadius: BorderRadius.circular(16),
@@ -247,24 +402,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        _buildPrayerTime('الفجر', 'Fajr', '5:12'),
-                        _buildDivider(),
-                        _buildPrayerTime('الشروق', 'Sunrise', '6:22'),
-                        _buildDivider(),
-                        _buildPrayerTime('الظهر', 'Dhuhr', '12:25'),
-                        _buildDivider(),
-                        _buildPrayerTime('العصر', 'Asr', '3:45'),
-                        _buildDivider(),
-                        _buildPrayerTime('المغرب', 'Maghrib', '6:30'),
-                        _buildDivider(),
-                        _buildPrayerTime('العشاء', 'Isha', '7:45'),
+                        for (int i = 0; i < _prayerTimes.length; i++)
+                          _buildPrayerTime(
+                            _prayerTimes[i]['ar']!,
+                            _prayerTimes[i]['en']!,
+                            _prayerTimes[i]['time']!,
+                            isActive: _activePrayer == _prayerTimes[i]['en'],
+                            isUpcoming: _upcomingPrayer == _prayerTimes[i]['en'],
+                          ),
                       ],
                     ),
                   ),
                 ),
-
+                
                 const Spacer(flex: 2),
-
+                
                 // Main buttons
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -280,9 +432,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ],
                   ),
                 ),
-
+                
                 const Spacer(flex: 3),
-
+                
                 // Ad
                 if (_isBannerAdLoaded && _bannerAd != null)
                   Container(
@@ -301,21 +453,77 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildDivider() {
-    return Container(
-      width: 1,
-      height: 25,
-      color: Colors.white24,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-    );
-  }
-
-  Widget _buildPrayerTime(String arLabel, String enLabel, String time) {
+  Widget _buildPrayerTime(String arLabel, String enLabel, String time, 
+      {required bool isActive, required bool isUpcoming}) {
     final settings = ref.watch(settingsProvider);
     final label = settings.language == AppLanguage.arabic ? arLabel : enLabel;
     
+    // For active prayer - red blinking
+    if (isActive) {
+      return AnimatedBuilder(
+        animation: _blinkAnimation,
+        builder: (context, child) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  time,
+                  style: TextStyle(
+                    color: Colors.red.withOpacity(_blinkAnimation.value),
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.red.withOpacity(_blinkAnimation.value),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+    
+    // For upcoming prayer - orange bold (static)
+    if (isUpcoming) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              time,
+              style: const TextStyle(
+                color: Colors.orange,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.orange,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    
+    // Normal prayer - white
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -323,15 +531,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             time,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
           ),
+          const SizedBox(height: 2),
           Text(
             label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.90),
-              fontSize: 9,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
             ),
           ),
         ],
