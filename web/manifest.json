@@ -1,13 +1,10 @@
 {
-    "name": "tanbihulanam",
-    "short_name": "tanbihulanam",
+    "name": "تنبيه الأنام",
+    "short_name": "تنبيه الأنام",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
-    "prefer_related_applications": false,
+    "background_color": "#0A5C36",
+    "theme_color": "#0A5C36",
     "icons": [
         {
             "src": "icons/Icon-192.png",
@@ -18,18 +15,6 @@
             "src": "icons/Icon-512.png",
             "sizes": "512x512",
             "type": "image/png"
-        },
-        {
-            "src": "icons/Icon-maskable-192.png",
-            "sizes": "192x192",
-            "type": "image/png",
-            "purpose": "maskable"
-        },
-        {
-            "src": "icons/Icon-maskable-512.png",
-            "sizes": "512x512",
-            "type": "image/png",
-            "purpose": "maskable"
         }
     ]
 }

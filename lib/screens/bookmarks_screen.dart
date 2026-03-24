@@ -5,7 +5,6 @@ import 'package:tanbihulanam/providers/data_provider.dart';
 import 'package:tanbihulanam/providers/settings_provider.dart';
 import 'package:tanbihulanam/services/bookmark_service.dart';
 import 'package:tanbihulanam/screens/juz_screen.dart';
-import 'package:tanbihulanam/models/salat_model.dart';
 
 class BookmarksScreen extends ConsumerStatefulWidget {
   const BookmarksScreen({super.key});
@@ -16,6 +15,7 @@ class BookmarksScreen extends ConsumerStatefulWidget {
 
 class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
   Set<String> _pageBookmarks = {};
+  Map<String, Map<String, dynamic>> _pageDetails = {};
   bool _isLoading = true;
 
   @override
@@ -26,9 +26,19 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
 
   Future<void> _loadBookmarks() async {
     final bookmarks = await BookmarkService.getPageBookmarks();
+    final details = <String, Map<String, dynamic>>{};
+    
+    for (var key in bookmarks) {
+      final detail = await BookmarkService.getPageDetails(key);
+      if (detail.isNotEmpty) {
+        details[key] = detail;
+      }
+    }
+    
     if (mounted) {
       setState(() {
         _pageBookmarks = bookmarks;
+        _pageDetails = details;
         _isLoading = false;
       });
     }
@@ -52,16 +62,6 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
   String _getLocalizedText(String ar, String en) {
     final settings = ref.watch(settingsProvider);
     return settings.language == AppLanguage.arabic ? ar : en;
-  }
-
-  // Parse page key to get juz and page info
-  Map<String, String> _parsePageKey(String pageKey) {
-    final parts = pageKey.split('_');
-    return {
-      'juz': parts.length > 0 ? parts[0] : '1',
-      'bab': parts.length > 1 ? parts[1] : '',
-      'page': parts.length > 2 ? parts[2] : '0',
-    };
   }
 
   @override
@@ -114,7 +114,7 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
                 );
                 
                 if (confirm == true) {
-                  await BookmarkService.clearAllBookmarks();
+                  await BookmarkService.clearAllPageBookmarks();
                   _loadBookmarks();
                 }
               },
@@ -165,117 +165,104 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
   }
 
   Widget _buildBookmarksList() {
-    return Consumer(
-      builder: (context, ref, child) {
-        final salawatAsync = ref.watch(salawatProvider);
+    final bookmarkedPagesList = _pageBookmarks.toList()..sort();
+    
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: bookmarkedPagesList.length,
+      itemBuilder: (context, index) {
+        final pageKey = bookmarkedPagesList[index];
+        final details = _pageDetails[pageKey] ?? {};
         
-        return salawatAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (err, stack) => Center(child: Text('خطأ: $err')),
-          data: (allSalawat) {
-            final bookmarkedPagesList = _pageBookmarks.toList()..sort();
-            
-            return ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: bookmarkedPagesList.length,
-              itemBuilder: (context, index) {
-                final pageKey = bookmarkedPagesList[index];
-                final parsed = _parsePageKey(pageKey);
-                final juz = int.tryParse(parsed['juz'] ?? '1') ?? 1;
-                final pageNum = int.tryParse(parsed['page'] ?? '0') ?? 0;
-                final bab = parsed['bab'] ?? '';
-                
-                // Find a sample salawat from this page for preview
-                final pageSalawat = allSalawat
-                    .where((s) => s.juz == juz && (bab.isEmpty || s.bab == bab))
-                    .toList();
-                
-                final sampleSalat = pageSalawat.isNotEmpty ? pageSalawat.first : null;
-                
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+        final juz = details['juzNumber'] ?? 1;
+        final pageNumber = details['pageNumber'] ?? 1;
+        final babName = details['babName'] ?? '';
+        
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: InkWell(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => JuzScreen(
+                    juzNumber: juz,
+                    initialPage: pageNumber,
                   ),
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => JuzScreen(
-                            juzNumber: juz,
-                            initialPage: pageNum,
-                          ),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0A5C36),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '$pageNumber',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 50,
-                            height: 50,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0A5C36),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Center(
-                              child: Icon(
-                                Icons.bookmark,
-                                color: Colors.white,
-                                size: 24,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${_getLocalizedText('الجزء', 'Part')} $juz',
-                                  style: GoogleFonts.amiri(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: const Color(0xFF0A5C36),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  bab.isNotEmpty && bab != 'all' 
-                                      ? bab
-                                      : _getLocalizedText('جميع الأبواب', 'All chapters'),
-                                  style: GoogleFonts.amiri(
-                                    fontSize: 14,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                                if (sampleSalat != null)
-                                  Text(
-                                    '${_getLocalizedText('صفحة', 'Page')} ${sampleSalat.page} - ${sampleSalat.page + 5}',
-                                    style: GoogleFonts.amiri(
-                                      fontSize: 12,
-                                      color: Colors.grey[500],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red),
-                            onPressed: () => _removeBookmark(pageKey),
-                          ),
-                        ],
                       ),
                     ),
                   ),
-                );
-              },
-            );
-          },
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${_getLocalizedText('الجزء', 'Part')} $juz',
+                          style: GoogleFonts.amiri(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF0A5C36),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        if (babName.isNotEmpty)
+                          Text(
+                            babName,
+                            style: GoogleFonts.amiri(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_getLocalizedText('صفحة', 'Page')} $pageNumber',
+                          style: GoogleFonts.amiri(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF0A5C36).withOpacity(0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: () => _removeBookmark(pageKey),
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );

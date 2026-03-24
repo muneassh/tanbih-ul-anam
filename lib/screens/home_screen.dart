@@ -57,11 +57,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       CurvedAnimation(parent: _blinkController, curve: Curves.easeInOut),
     );
     
-    // Check prayer times every 30 seconds
-    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      _checkPrayerTimes();
+    // Start timer after initState completes
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
+        _checkPrayerTimes();
+      });
+      _checkPrayerTimes(); // Initial check
     });
-    _checkPrayerTimes(); // Initial check
   }
 
   @override
@@ -104,7 +106,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       final prayerTime = prayer['time']!;
       final prayerMinutes = _getMinutesFromTime(prayerTime);
       
-      // Prayer is active for 30 minutes after its time
       if (currentMinutes >= prayerMinutes && currentMinutes < prayerMinutes + 30) {
         activePrayer = prayer['en'];
         break;
@@ -119,7 +120,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       final prayerTime = prayer['time']!;
       final prayerMinutes = _getMinutesFromTime(prayerTime);
       
-      // Only consider future prayers
       if (prayerMinutes > currentMinutes) {
         final diff = prayerMinutes - currentMinutes;
         if (diff <= 15) {
@@ -164,46 +164,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
   }
 
   void _showPrayerNotification(String prayer, String type, [int? minutes]) {
-    // Find prayer data
-    final prayerData = _prayerTimes.firstWhere(
-      (p) => p['en'] == prayer,
-      orElse: () => {'ar': prayer, 'en': prayer},
-    );
-    
-    final settings = ref.read(settingsProvider);
-    final name = settings.language == AppLanguage.arabic ? prayerData['ar']! : prayerData['en']!;
-    
-    String message;
-    Color backgroundColor;
-    
-    if (type == 'started') {
-      message = 'حان الآن وقت صلاة $name';
-      backgroundColor = Colors.green;
-    } else {
-      message = 'متبقي $minutes دقيقة على صلاة $name';
-      backgroundColor = Colors.orange;
-    }
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(type == 'started' ? Icons.access_time : Icons.timer, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: GoogleFonts.amiri(fontSize: 14),
+    // Use addPostFrameCallback to ensure Scaffold is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      
+      final prayerData = _prayerTimes.firstWhere(
+        (p) => p['en'] == prayer,
+        orElse: () => {'ar': prayer, 'en': prayer},
+      );
+      
+      final settings = ref.read(settingsProvider);
+      final name = settings.language == AppLanguage.arabic ? prayerData['ar']! : prayerData['en']!;
+      
+      String message;
+      Color backgroundColor;
+      
+      if (type == 'started') {
+        message = 'حان الآن وقت صلاة $name';
+        backgroundColor = Colors.green;
+      } else {
+        message = 'متبقي $minutes دقيقة على صلاة $name';
+        backgroundColor = Colors.orange;
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(type == 'started' ? Icons.access_time : Icons.timer, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: GoogleFonts.amiri(fontSize: 14),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          backgroundColor: backgroundColor,
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
-        backgroundColor: backgroundColor,
-        duration: const Duration(seconds: 4),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+      );
+    });
   }
 
   String _getLocalizedText(String ar, String en) {
@@ -215,6 +219,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final screenWidth = MediaQuery.of(context).size.width;
+    
+    // Find upcoming prayer for highlighting
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    
+    String? upcomingPrayer;
+    int? upcomingTimeDiff;
+    
+    for (var entry in _prayerTimes) {
+      final prayerTime = entry['time']!;
+      final parts = prayerTime.split(':');
+      final prayerMinutes = int.parse(parts[0]) * 60 + int.parse(parts[1]);
+      final diff = prayerMinutes - currentMinutes;
+      
+      if (diff > 0 && diff <= 15) {
+        if (upcomingPrayer == null || diff < upcomingTimeDiff!) {
+          upcomingPrayer = entry['en'];
+          upcomingTimeDiff = diff;
+        }
+      }
+    }
     
     return Scaffold(
       body: Stack(
@@ -389,6 +414,89 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                   ),
                 
                 const Spacer(flex: 1),
+                
+                // DEDICATION TEXT BOX
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.65),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.3),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 3,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0A5C36),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'إهداء',
+                              style: GoogleFonts.amiri(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: const Color(0xFF0A5C36),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'هذا العمل المتواضع أهديه إلى روحي أبي وإلى شيخي',
+                              style: GoogleFonts.amiri(
+                                fontSize: 12,
+                                color: Colors.white,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'ሶዋቡን ለአባቴ እና ለሼይኼ',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.white70,
+                                fontFamily: 'monospace',
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        width: 35,
+                        height: 35,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0A5C36).withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        child: const Icon(
+                          Icons.favorite,
+                          color: Color(0xFF0A5C36),
+                          size: 18,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 8),
                 
                 // Prayer times bar with highlighting
                 Container(

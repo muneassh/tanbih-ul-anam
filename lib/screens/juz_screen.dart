@@ -33,18 +33,29 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
   late PageController _pageController;
   bool _isFullScreen = false;
   bool _isInitialized = false;
-  Map<int, bool> _bookmarkedStatus = {};
+  
+  Set<String> _pageBookmarks = {};
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController();
+    _loadPageBookmarks();
   }
 
   @override
   void dispose() {
     _pageController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPageBookmarks() async {
+    final bookmarks = await BookmarkService.getPageBookmarks();
+    if (mounted) {
+      setState(() {
+        _pageBookmarks = bookmarks;
+      });
+    }
   }
 
   @override
@@ -65,17 +76,55 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
         _currentSalawat = juzItems;
       });
       
-      // Check bookmark status for all salawat
-      for (var salat in juzItems) {
-        final isBookmarked = await BookmarkService.isBookmarked(salat.id);
-        setState(() {
-          _bookmarkedStatus[salat.id] = isBookmarked;
-        });
+      // If initialPage is provided, go to that page directly (for bookmarks)
+      if (widget.initialPage != null) {
+        final pageNumber = widget.initialPage!;
+        SalatModel? targetSalat;
+        String? targetBab;
+        
+        for (var salat in juzItems) {
+          if (salat.page == pageNumber) {
+            targetSalat = salat;
+            targetBab = salat.bab;
+            break;
+          }
+        }
+        
+        if (targetSalat != null && targetBab != null && mounted) {
+          final Map<String, List<SalatModel>> grouped = {};
+          for (var item in juzItems) {
+            final key = item.bab.isNotEmpty ? item.bab : _getLocalizedText('غير مصنف', 'Uncategorized');
+            grouped.putIfAbsent(key, () => []).add(item);
+          }
+          
+          if (grouped.containsKey(targetBab)) {
+            setState(() {
+              _selectedBab = targetBab;
+              _currentSalawat = grouped[targetBab]!;
+            });
+            
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _recalculatePagination();
+              
+              // Wait for PageView to be built
+              Future.delayed(const Duration(milliseconds: 150), () {
+                if (mounted && _pageController.hasClients) {
+                  for (int i = 0; i < _paginatedSalawat.length; i++) {
+                    final pageSalawat = _paginatedSalawat[i];
+                    if (pageSalawat.any((s) => s.page == pageNumber)) {
+                      _currentPageIndex = i;
+                      _pageController.jumpToPage(i);
+                      break;
+                    }
+                  }
+                }
+              });
+            });
+          }
+        }
       }
-      
       // If initialSalatId is provided, go directly to that salawat (for resume)
-      if (widget.initialSalatId != null) {
-        // Find which bab this salat belongs to
+      else if (widget.initialSalatId != null) {
         final Map<String, List<SalatModel>> grouped = {};
         for (var item in juzItems) {
           final key = item.bab.isNotEmpty ? item.bab : _getLocalizedText('غير مصنف', 'Uncategorized');
@@ -100,18 +149,20 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
             _currentSalawat = grouped[targetBab]!;
           });
           
-          // Recalculate pagination with new salawat list
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _recalculatePagination();
             
-            // Find which page contains this salat
-            for (int i = 0; i < _paginatedSalawat.length; i++) {
-              if (_paginatedSalawat[i].any((s) => s.id == widget.initialSalatId)) {
-                _currentPageIndex = i;
-                _pageController.jumpToPage(i);
-                break;
+            Future.delayed(const Duration(milliseconds: 150), () {
+              if (mounted && _pageController.hasClients) {
+                for (int i = 0; i < _paginatedSalawat.length; i++) {
+                  if (_paginatedSalawat[i].any((s) => s.id == widget.initialSalatId)) {
+                    _currentPageIndex = i;
+                    _pageController.jumpToPage(i);
+                    break;
+                  }
+                }
               }
-            }
+            });
           });
         }
       }
@@ -127,32 +178,47 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
     setState(() {
       _isFullScreen = !_isFullScreen;
     });
-    // Recalculate after state update
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _recalculatePagination();
     });
   }
 
-  Future<void> _toggleBookmark(int salatId) async {
-    final isBookmarked = _bookmarkedStatus[salatId] ?? false;
+  String _getPageKey(int pageIndex) {
+    return '${widget.juzNumber}_${_selectedBab ?? 'all'}_$pageIndex';
+  }
+
+  Future<void> _togglePageBookmark(int pageIndex) async {
+    final pageKey = _getPageKey(pageIndex);
+    final isBookmarked = _pageBookmarks.contains(pageKey);
+    
+    final pageSalawat = _paginatedSalawat[pageIndex];
+    final firstSalat = pageSalawat.isNotEmpty ? pageSalawat.first : null;
+    final pageNumber = firstSalat?.page ?? 1;
     
     try {
       if (isBookmarked) {
-        await BookmarkService.removeBookmark(salatId);
-        print('Bookmark removed: $salatId');
+        await BookmarkService.removePageBookmark(pageKey);
+        setState(() {
+          _pageBookmarks.remove(pageKey);
+        });
       } else {
-        await BookmarkService.addBookmark(salatId);
-        print('Bookmark added: $salatId');
+        await BookmarkService.addPageBookmark(
+          pageKey,
+          pageNumber: pageNumber,
+          babName: _selectedBab,
+          juzNumber: widget.juzNumber,
+        );
+        setState(() {
+          _pageBookmarks.add(pageKey);
+        });
       }
-      
-      setState(() {
-        _bookmarkedStatus[salatId] = !isBookmarked;
-      });
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(!isBookmarked ? '✓ تمت الإضافة إلى المفضلة' : '✓ تمت الإزالة من المفضلة'),
+            content: Text(!isBookmarked 
+                ? '✓ تمت إضافة الصفحة ${pageNumber} إلى المفضلة' 
+                : '✓ تمت إزالة الصفحة ${pageNumber} من المفضلة'),
             duration: const Duration(seconds: 1),
             behavior: SnackBarBehavior.floating,
             backgroundColor: !isBookmarked ? Colors.green : Colors.orange,
@@ -161,7 +227,7 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
         );
       }
     } catch (e) {
-      print('Error toggling bookmark: $e');
+      print('Error toggling page bookmark: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -174,7 +240,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
     }
   }
 
-  // Recalculate pagination based on current font size and screen height
   void _recalculatePagination() {
     if (_currentSalawat.isEmpty) return;
     
@@ -189,8 +254,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
     List<SalatModel> currentPage = [];
     double currentPageHeight = 0;
     double headerHeight = 40;
-    
-    print('Recalculating pagination: ${_currentSalawat.length} salawat, fontSize: ${settings.fontSize}, availableHeight: $availableHeight');
     
     for (var salat in _currentSalawat) {
       int avgCharsPerWord = 5;
@@ -208,7 +271,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
       
       if (totalHeight > availableHeight && currentPage.isNotEmpty) {
         pages.add(currentPage);
-        print('Page ${pages.length}: ${currentPage.length} salawat, height: $currentPageHeight');
         currentPage = [salat];
         currentPageHeight = salatHeight;
       } else {
@@ -221,19 +283,14 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
     
     if (currentPage.isNotEmpty) {
       pages.add(currentPage);
-      print('Page ${pages.length}: ${currentPage.length} salawat, height: $currentPageHeight');
     }
-    
-    print('Total pages: ${pages.length}');
     
     setState(() {
       _paginatedSalawat = pages;
     });
   }
 
-  // Helper function to extract bab number for sorting
   int _getBabNumber(String babName) {
-    // Arabic numerals mapping
     final arabicNumbers = {
       '١': 1, '٢': 2, '٣': 3, '٤': 4, '٥': 5,
       '٦': 6, '٧': 7, '٨': 8, '٩': 9, '١٠': 10,
@@ -241,29 +298,24 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
       '١٦': 16, '١٧': 17, '١٨': 18, '١٩': 19, '٢٠': 20
     };
     
-    // Try to find pattern like "باب (١)" or "باب (1)"
     final pattern = RegExp(r'باب\s*\(([^)]+)\)');
     final match = pattern.firstMatch(babName);
     
     if (match != null) {
       String numberStr = match.group(1)!;
-      // Check if it's Arabic numeral
       if (arabicNumbers.containsKey(numberStr)) {
         return arabicNumbers[numberStr]!;
       }
-      // Try to parse as Western number
       int? num = int.tryParse(numberStr);
       if (num != null) return num;
     }
     
-    // Check for patterns without parentheses
     for (var entry in arabicNumbers.entries) {
       if (babName.contains('(${entry.key})')) {
         return entry.value;
       }
     }
     
-    // Check for specific bab names based on content
     if (babName.contains('في فضل الصلاة')) return 1;
     if (babName.contains('في وصف خلقه')) return 2;
     if (babName.contains('في معرفة آياته')) return 3;
@@ -272,10 +324,8 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
     if (babName.contains('في ذكر حقه على أمته')) return 6;
     if (babName.contains('في ذكر بعض مناقب آله')) return 7;
     if (babName.contains('في الاستغفار والدعاء')) return 8;
-    if (babName.contains('في نَسَبِهِ الْكَرِيمِ')) return 9;
-    if (babName.contains('في أَسْمَائِهِ الطَّاهِرَةِ')) return 10;
     
-    return 999; // Put unknown at the end
+    return 999;
   }
 
   @override
@@ -312,16 +362,13 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                 );
               }
 
-              // If no bab selected, show list of babs
-              if (_selectedBab == null && widget.initialSalatId == null) {
-                // Group by bab
+              if (_selectedBab == null && widget.initialSalatId == null && widget.initialPage == null) {
                 final Map<String, List<SalatModel>> grouped = {};
                 for (var item in juzItems) {
                   final key = item.bab.isNotEmpty ? item.bab : _getLocalizedText('غير مصنف', 'Uncategorized');
                   grouped.putIfAbsent(key, () => []).add(item);
                 }
 
-                // Sort babs by their numeric order as they appear
                 List<String> sortedKeys = grouped.keys.toList();
                 sortedKeys.sort((a, b) {
                   int numA = _getBabNumber(a);
@@ -332,7 +379,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                 return SafeArea(
                   child: Column(
                     children: [
-                      // Header for bab list
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -370,8 +416,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                           itemBuilder: (context, index) {
                             final babName = sortedKeys[index];
                             final items = grouped[babName]!;
-
-                            // Sort items within each bab by page number
                             items.sort((a, b) => a.page.compareTo(b.page));
 
                             return Card(
@@ -465,7 +509,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                 );
               }
 
-              // Bab selected or resume - show reading view
               if (_paginatedSalawat.isEmpty && _currentSalawat.isNotEmpty) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   _recalculatePagination();
@@ -480,7 +523,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
               return SafeArea(
                 child: Column(
                   children: [
-                    // HEADER
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                       decoration: BoxDecoration(
@@ -657,7 +699,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                       ),
                     ),
                     
-                    // PAGE VIEW
                     Expanded(
                       child: PageView.builder(
                         controller: _pageController,
@@ -683,7 +724,7 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                         itemBuilder: (context, pageIndex) {
                           final pageSalawat = _paginatedSalawat[pageIndex];
                           final firstSalat = pageSalawat.first;
-                          final isPageBookmarked = false; // For future page bookmark feature
+                          final isPageBookmarked = _pageBookmarks.contains(_getPageKey(pageIndex));
                           
                           return Container(
                             color: settings.isDarkMode 
@@ -693,7 +734,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Page Header
                                 Container(
                                   margin: const EdgeInsets.only(bottom: 12),
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -738,7 +778,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                                   ),
                                 ),
                                 
-                                // Page bookmark summary
                                 Align(
                                   alignment: Alignment.centerLeft,
                                   child: Row(
@@ -747,119 +786,54 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                                         icon: Icon(
                                           isPageBookmarked ? Icons.bookmark : Icons.bookmark_border,
                                           color: isPageBookmarked ? Colors.amber : Colors.grey,
-                                          size: 24,
+                                          size: 32,
                                         ),
-                                        onPressed: () {
-                                          // Show options for all salawat on this page
-                                          showDialog(
-                                            context: context,
-                                            builder: (context) => AlertDialog(
-                                              title: Text(
-                                                _getLocalizedText('خيارات الصفحة', 'Page Options'),
-                                                style: GoogleFonts.amiri(),
-                                              ),
-                                              content: SizedBox(
-                                                width: double.maxFinite,
-                                                child: Column(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    ListTile(
-                                                      leading: const Icon(Icons.bookmark_add, color: Colors.green),
-                                                      title: Text(
-                                                        _getLocalizedText('إضافة كل الصفحة للمفضلة', 'Bookmark all on page'),
-                                                        style: GoogleFonts.amiri(),
-                                                      ),
-                                                      onTap: () async {
-                                                        Navigator.pop(context);
-                                                        for (var salat in pageSalawat) {
-                                                          if (!(_bookmarkedStatus[salat.id] ?? false)) {
-                                                            await _toggleBookmark(salat.id);
-                                                          }
-                                                        }
-                                                      },
-                                                    ),
-                                                    ListTile(
-                                                      leading: const Icon(Icons.bookmark_remove, color: Colors.red),
-                                                      title: Text(
-                                                        _getLocalizedText('إزالة كل الصفحة من المفضلة', 'Remove all bookmarks on page'),
-                                                        style: GoogleFonts.amiri(),
-                                                      ),
-                                                      onTap: () async {
-                                                        Navigator.pop(context);
-                                                        for (var salat in pageSalawat) {
-                                                          if (_bookmarkedStatus[salat.id] ?? false) {
-                                                            await _toggleBookmark(salat.id);
-                                                          }
-                                                        }
-                                                      },
-                                                    ),
-                                                    ListTile(
-                                                      leading: const Icon(Icons.info, color: Colors.blue),
-                                                      title: Text(
-                                                        '${_getLocalizedText('صفحة بها', 'Page has')} ${pageSalawat.where((s) => _bookmarkedStatus[s.id] == true).length} ${_getLocalizedText('صلاة في المفضلة', 'bookmarked prayers')}',
-                                                        style: GoogleFonts.amiri(),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        },
+                                        onPressed: () => _togglePageBookmark(pageIndex),
                                         padding: EdgeInsets.zero,
                                         constraints: const BoxConstraints(),
                                       ),
                                       Text(
-                                        '${pageSalawat.where((s) => _bookmarkedStatus[s.id] == true).length}/${pageSalawat.length}',
+                                        isPageBookmarked 
+                                            ? _getLocalizedText('صفحة في المفضلة', 'Page bookmarked')
+                                            : _getLocalizedText('أضف الصفحة للمفضلة', 'Bookmark this page'),
                                         style: GoogleFonts.amiri(
-                                          fontSize: 12,
-                                          color: Colors.grey[600],
+                                          fontSize: 13,
+                                          fontWeight: isPageBookmarked ? FontWeight.bold : FontWeight.normal,
+                                          color: isPageBookmarked ? Colors.amber[700] : Colors.grey[600],
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
                                 
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 8),
                                 
-                                // Salawat list
                                 Expanded(
                                   child: ListView.builder(
                                     itemCount: pageSalawat.length,
                                     itemBuilder: (context, salatIndex) {
                                       final salat = pageSalawat[salatIndex];
-                                      final isBookmarked = _bookmarkedStatus[salat.id] ?? false;
                                       
                                       return Container(
                                         margin: const EdgeInsets.only(bottom: 12),
                                         child: Row(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            // Bookmark number circle
-                                            GestureDetector(
-                                              onTap: () => _toggleBookmark(salat.id),
-                                              child: Container(
-                                                width: 36,
-                                                height: 36,
-                                                margin: const EdgeInsets.only(left: 4, top: 2),
-                                                decoration: BoxDecoration(
-                                                  color: isBookmarked 
-                                                      ? Colors.amber.withOpacity(0.3)
-                                                      : const Color(0xFF0A5C36).withOpacity(0.1),
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(
-                                                    color: isBookmarked ? Colors.amber : const Color(0xFF0A5C36).withOpacity(0.3),
-                                                    width: 1.5,
-                                                  ),
-                                                ),
-                                                child: Center(
-                                                  child: Text(
-                                                    '${salatIndex + 1}',
-                                                    style: TextStyle(
-                                                      fontSize: 13,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: isBookmarked ? Colors.amber[800] : const Color(0xFF0A5C36),
-                                                    ),
+                                            Container(
+                                              width: 30,
+                                              height: 30,
+                                              margin: const EdgeInsets.only(left: 4, top: 2),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF0A5C36).withOpacity(0.1),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  '${salatIndex + 1}',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: const Color(0xFF0A5C36),
                                                   ),
                                                 ),
                                               ),
@@ -867,57 +841,15 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                                             
                                             const SizedBox(width: 8),
                                             
-                                            // Salawat content
                                             Expanded(
-                                              child: GestureDetector(
-                                                onTap: () => _toggleBookmark(salat.id),
-                                                onLongPress: () {
-                                                  showDialog(
-                                                    context: context,
-                                                    builder: (context) => AlertDialog(
-                                                      title: Text(
-                                                        _getLocalizedText('خيارات', 'Options'),
-                                                        style: GoogleFonts.amiri(),
-                                                      ),
-                                                      content: Text(
-                                                        _getLocalizedText('ماذا تريد أن تفعل؟', 'What would you like to do?'),
-                                                        style: GoogleFonts.amiri(),
-                                                      ),
-                                                      actions: [
-                                                        TextButton(
-                                                          onPressed: () {
-                                                            Navigator.pop(context);
-                                                            _toggleBookmark(salat.id);
-                                                          },
-                                                          child: Text(
-                                                            isBookmarked 
-                                                                ? _getLocalizedText('إزالة من المفضلة', 'Remove from bookmarks')
-                                                                : _getLocalizedText('إضافة إلى المفضلة', 'Add to bookmarks'),
-                                                            style: GoogleFonts.amiri(),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                },
-                                                child: Container(
-                                                  padding: const EdgeInsets.all(6),
-                                                  decoration: BoxDecoration(
-                                                    color: isBookmarked 
-                                                        ? Colors.amber.withOpacity(0.05)
-                                                        : Colors.transparent,
-                                                    borderRadius: BorderRadius.circular(8),
-                                                    border: isBookmarked
-                                                        ? Border.all(color: Colors.amber.withOpacity(0.3), width: 1)
-                                                        : null,
-                                                  ),
-                                                  child: HighlightedText(
-                                                    text: salat.arabic,
-                                                    fontSize: settings.fontSize,
-                                                    font: settings.selectedFont,
-                                                    isDarkMode: settings.isDarkMode,
-                                                    textAlign: TextAlign.right,
-                                                  ),
+                                              child: Container(
+                                                padding: const EdgeInsets.all(6),
+                                                child: HighlightedText(
+                                                  text: salat.arabic,
+                                                  fontSize: settings.fontSize,
+                                                  font: settings.selectedFont,
+                                                  isDarkMode: settings.isDarkMode,
+                                                  textAlign: TextAlign.right,
                                                 ),
                                               ),
                                             ),
@@ -928,7 +860,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                                   ),
                                 ),
                                 
-                                // Page footer
                                 Container(
                                   margin: const EdgeInsets.only(top: 8),
                                   padding: const EdgeInsets.symmetric(vertical: 4),
@@ -958,7 +889,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                       ),
                     ),
                     
-                    // Bottom ad
                     if (!_isFullScreen)
                       const Padding(
                         padding: EdgeInsets.only(bottom: 4),
