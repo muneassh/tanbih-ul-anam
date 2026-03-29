@@ -10,8 +10,10 @@ import 'introduction_screen.dart';
 import 'conclusion_screen.dart';
 import 'bookmarks_screen.dart';
 import 'search_screen.dart';
+import 'groups_screen.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/ad_widget.dart';
+import '../services/prayer_times_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -24,30 +26,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
   BannerAd? _bannerAd;
   bool _isBannerAdLoaded = false;
   
-  // Prayer times data (in order)
-  final List<Map<String, String>> _prayerTimes = [
-    {'ar': 'الفجر', 'en': 'Fajr', 'time': '05:12'},
-    {'ar': 'الشروق', 'en': 'Sunrise', 'time': '06:22'},
-    {'ar': 'الظهر', 'en': 'Dhuhr', 'time': '12:25'},
-    {'ar': 'العصر', 'en': 'Asr', 'time': '15:45'},
-    {'ar': 'المغرب', 'en': 'Maghrib', 'time': '18:30'},
-    {'ar': 'العشاء', 'en': 'Isha', 'time': '19:45'},
-  ];
+  // Prayer times data
+  Map<String, String> _prayerTimes = {
+    'Fajr': '--:--',
+    'Sunrise': '--:--',
+    'Dhuhr': '--:--',
+    'Asr': '--:--',
+    'Maghrib': '--:--',
+    'Isha': '--:--',
+  };
   
-  // Track which prayer is currently active
+  // Prayer names for display
+  final Map<String, Map<String, String>> _prayerNames = {
+    'Fajr': {'ar': 'الفجر', 'en': 'Fajr'},
+    'Sunrise': {'ar': 'الشروق', 'en': 'Sunrise'},
+    'Dhuhr': {'ar': 'الظهر', 'en': 'Dhuhr'},
+    'Asr': {'ar': 'العصر', 'en': 'Asr'},
+    'Maghrib': {'ar': 'المغرب', 'en': 'Maghrib'},
+    'Isha': {'ar': 'العشاء', 'en': 'Isha'},
+  };
+  
   String? _activePrayer;
   String? _upcomingPrayer;
   int? _upcomingMinutes;
   Timer? _timer;
   late AnimationController _blinkController;
   late Animation<double> _blinkAnimation;
+  String _locationStatus = 'جاري تحديد الموقع...';
+  bool _isLoadingLocation = true;
 
   @override
   void initState() {
     super.initState();
     _loadBannerAd();
     
-    // Initialize blinking animation for active prayer
+    // Initialize blinking animation
     _blinkController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -57,13 +70,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       CurvedAnimation(parent: _blinkController, curve: Curves.easeInOut),
     );
     
-    // Start timer after initState completes
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
-        _checkPrayerTimes();
+    // Initialize prayer times service
+    _initializePrayerTimes();
+  }
+
+  Future<void> _initializePrayerTimes() async {
+    final service = PrayerTimesService.instance;
+    
+    // Request location permission
+    final hasPermission = await service.requestLocationPermission();
+    if (!hasPermission) {
+      setState(() {
+        _locationStatus = 'يرجى تفعيل الموقع';
+        _isLoadingLocation = false;
       });
-      _checkPrayerTimes(); // Initial check
+      return;
+    }
+    
+    // Get location and prayer times
+    final location = await service.getCurrentLocation();
+    setState(() {
+      _locationStatus = '${location['city']}, ${location['country']}';
+      _isLoadingLocation = false;
     });
+    
+    // Get initial prayer times
+    final times = await service.getPrayerTimes();
+    setState(() {
+      _prayerTimes = times;
+    });
+    
+    // Start monitoring
+    service.startPrayerMonitoring(
+      (times) {
+        if (mounted) {
+          setState(() {
+            _prayerTimes = times;
+          });
+        }
+      },
+      (prayerEn, prayerAr) {
+        if (mounted) {
+          _showPrayerNotification(prayerEn, prayerAr);
+          setState(() {
+            _activePrayer = prayerEn;
+          });
+        }
+      },
+    );
+    
+    // Start checking prayer times
+    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _checkPrayerTimes();
+    });
+    _checkPrayerTimes();
   }
 
   @override
@@ -92,6 +152,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
   }
 
   int _getMinutesFromTime(String time) {
+    if (time == '--:--') return 0;
     final parts = time.split(':');
     return int.parse(parts[0]) * 60 + int.parse(parts[1]);
   }
@@ -102,12 +163,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
     
     // Find current prayer (active within 30 minutes after its time)
     String? activePrayer;
-    for (var prayer in _prayerTimes) {
-      final prayerTime = prayer['time']!;
-      final prayerMinutes = _getMinutesFromTime(prayerTime);
+    for (var prayer in _prayerTimes.keys) {
+      if (prayer == 'Sunrise') continue;
+      final prayerMinutes = _getMinutesFromTime(_prayerTimes[prayer]!);
       
       if (currentMinutes >= prayerMinutes && currentMinutes < prayerMinutes + 30) {
-        activePrayer = prayer['en'];
+        activePrayer = prayer;
         break;
       }
     }
@@ -116,39 +177,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
     String? upcomingPrayer;
     int? upcomingMinutes;
     
-    for (var prayer in _prayerTimes) {
-      final prayerTime = prayer['time']!;
-      final prayerMinutes = _getMinutesFromTime(prayerTime);
+    for (var prayer in _prayerTimes.keys) {
+      if (prayer == 'Sunrise') continue;
+      final prayerMinutes = _getMinutesFromTime(_prayerTimes[prayer]!);
       
       if (prayerMinutes > currentMinutes) {
         final diff = prayerMinutes - currentMinutes;
         if (diff <= 15) {
-          upcomingPrayer = prayer['en'];
+          upcomingPrayer = prayer;
           upcomingMinutes = diff;
           break;
         }
       }
     }
     
-    // Handle midnight case (next day's Fajr)
-    if (upcomingPrayer == null) {
-      final firstPrayerMinutes = _getMinutesFromTime(_prayerTimes[0]['time']!);
-      final diff = (firstPrayerMinutes + 24 * 60) - currentMinutes;
-      if (diff <= 15) {
-        upcomingPrayer = _prayerTimes[0]['en'];
-        upcomingMinutes = diff;
-      }
-    }
-    
-    // Update state if changed
+    // Update state
     if (activePrayer != _activePrayer) {
       setState(() {
         _activePrayer = activePrayer;
       });
-      
-      if (activePrayer != null) {
-        _showPrayerNotification(activePrayer, 'started');
-      }
     }
     
     if (upcomingPrayer != _upcomingPrayer || upcomingMinutes != _upcomingMinutes) {
@@ -156,58 +203,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
         _upcomingPrayer = upcomingPrayer;
         _upcomingMinutes = upcomingMinutes;
       });
-      
-      if (upcomingPrayer != null && upcomingMinutes != null && upcomingMinutes <= 5) {
-        _showPrayerNotification(upcomingPrayer, 'upcoming', upcomingMinutes);
-      }
     }
   }
 
-  void _showPrayerNotification(String prayer, String type, [int? minutes]) {
-    // Use addPostFrameCallback to ensure Scaffold is ready
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      
-      final prayerData = _prayerTimes.firstWhere(
-        (p) => p['en'] == prayer,
-        orElse: () => {'ar': prayer, 'en': prayer},
-      );
-      
-      final settings = ref.read(settingsProvider);
-      final name = settings.language == AppLanguage.arabic ? prayerData['ar']! : prayerData['en']!;
-      
-      String message;
-      Color backgroundColor;
-      
-      if (type == 'started') {
-        message = 'حان الآن وقت صلاة $name';
-        backgroundColor = Colors.green;
-      } else {
-        message = 'متبقي $minutes دقيقة على صلاة $name';
-        backgroundColor = Colors.orange;
-      }
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(type == 'started' ? Icons.access_time : Icons.timer, color: Colors.white),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  message,
-                  style: GoogleFonts.amiri(fontSize: 14),
-                ),
+  void _showPrayerNotification(String prayerEn, String prayerAr) {
+    final settings = ref.read(settingsProvider);
+    final prayerName = settings.language == AppLanguage.arabic ? prayerAr : prayerEn;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.access_time, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                settings.language == AppLanguage.arabic
+                    ? 'حان الآن وقت صلاة $prayerName'
+                    : 'It\'s time for $prayerName prayer',
+                style: GoogleFonts.amiri(fontSize: 14),
               ),
-            ],
-          ),
-          backgroundColor: backgroundColor,
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ],
         ),
-      );
-    });
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   String _getLocalizedText(String ar, String en) {
@@ -219,27 +243,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final screenWidth = MediaQuery.of(context).size.width;
-    
-    // Find upcoming prayer for highlighting
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
-    
-    String? upcomingPrayer;
-    int? upcomingTimeDiff;
-    
-    for (var entry in _prayerTimes) {
-      final prayerTime = entry['time']!;
-      final parts = prayerTime.split(':');
-      final prayerMinutes = int.parse(parts[0]) * 60 + int.parse(parts[1]);
-      final diff = prayerMinutes - currentMinutes;
-      
-      if (diff > 0 && diff <= 15) {
-        if (upcomingPrayer == null || diff < upcomingTimeDiff!) {
-          upcomingPrayer = entry['en'];
-          upcomingTimeDiff = diff;
-        }
-      }
-    }
     
     return Scaffold(
       body: Stack(
@@ -279,8 +282,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                             width: 40,
                             height: 40,
                             child: IconButton(
-                              icon: const Icon(Icons.search,
-                                  color: Colors.white, size: 22),
+                              icon: const Icon(Icons.grid_view, color: Colors.white, size: 22),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const GroupsScreen()),
+                                );
+                              },
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: IconButton(
+                              icon: const Icon(Icons.search, color: Colors.white, size: 22),
                               onPressed: () {
                                 Navigator.push(
                                   context,
@@ -295,8 +312,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                             width: 40,
                             height: 40,
                             child: IconButton(
-                              icon: const Icon(Icons.settings_outlined,
-                                  color: Colors.white, size: 22),
+                              icon: const Icon(Icons.settings_outlined, color: Colors.white, size: 22),
                               onPressed: () {
                                 Navigator.push(
                                   context,
@@ -310,28 +326,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                         ],
                       ),
                       
-                      // Title
-                      Expanded(
-                        child: Text(
-                          _getLocalizedText('تنبيه الأنام', 'Tanbih al-Anam'),
-                          style: GoogleFonts.amiri(
-                            fontSize: screenWidth < 360 ? 18 : 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            shadows: const [
-                              Shadow(
-                                blurRadius: 4,
-                                color: Colors.black54,
-                                offset: Offset(1, 1),
-                              ),
-                            ],
+                      // App Logo/Title
+                      Container(
+                        height: 40,
+                        width: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.asset(
+                            'assets/images/icon.png',
+                            height: 40,
+                            width: 40,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => Icon(
+                              Icons.mosque,
+                              color: Colors.white,
+                              size: 30,
+                            ),
                           ),
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       
+                      // Right side icons
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -358,8 +377,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                             width: 40,
                             height: 40,
                             child: IconButton(
-                              icon: const Icon(Icons.bookmark_border,
-                                  color: Colors.white, size: 20),
+                              icon: const Icon(Icons.bookmark_border, color: Colors.white, size: 20),
                               onPressed: () {
                                 Navigator.push(
                                   context,
@@ -371,6 +389,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                             ),
                           ),
                         ],
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Location and prayer times header
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.location_on,
+                        size: 14,
+                        color: Colors.white70,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _isLoadingLocation ? 'جاري تحديد الموقع...' : _locationStatus,
+                        style: GoogleFonts.amiri(
+                          fontSize: 11,
+                          color: Colors.white70,
+                        ),
                       ),
                     ],
                   ),
@@ -426,13 +472,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                       color: Colors.white.withOpacity(0.3),
                       width: 1,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
                   ),
                   child: Row(
                     children: [
@@ -498,7 +537,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                 
                 const SizedBox(height: 8),
                 
-                // Prayer times bar with highlighting
+                // Prayer times bar
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 12),
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
@@ -510,14 +549,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        for (int i = 0; i < _prayerTimes.length; i++)
-                          _buildPrayerTime(
-                            _prayerTimes[i]['ar']!,
-                            _prayerTimes[i]['en']!,
-                            _prayerTimes[i]['time']!,
-                            isActive: _activePrayer == _prayerTimes[i]['en'],
-                            isUpcoming: _upcomingPrayer == _prayerTimes[i]['en'],
-                          ),
+                        _buildPrayerTime('Fajr', _prayerTimes['Fajr'] ?? '--:--',
+                            isActive: _activePrayer == 'Fajr',
+                            isUpcoming: _upcomingPrayer == 'Fajr'),
+                        _buildDivider(),
+                        _buildPrayerTime('Sunrise', _prayerTimes['Sunrise'] ?? '--:--',
+                            isActive: false,
+                            isUpcoming: false),
+                        _buildDivider(),
+                        _buildPrayerTime('Dhuhr', _prayerTimes['Dhuhr'] ?? '--:--',
+                            isActive: _activePrayer == 'Dhuhr',
+                            isUpcoming: _upcomingPrayer == 'Dhuhr'),
+                        _buildDivider(),
+                        _buildPrayerTime('Asr', _prayerTimes['Asr'] ?? '--:--',
+                            isActive: _activePrayer == 'Asr',
+                            isUpcoming: _upcomingPrayer == 'Asr'),
+                        _buildDivider(),
+                        _buildPrayerTime('Maghrib', _prayerTimes['Maghrib'] ?? '--:--',
+                            isActive: _activePrayer == 'Maghrib',
+                            isUpcoming: _upcomingPrayer == 'Maghrib'),
+                        _buildDivider(),
+                        _buildPrayerTime('Isha', _prayerTimes['Isha'] ?? '--:--',
+                            isActive: _activePrayer == 'Isha',
+                            isUpcoming: _upcomingPrayer == 'Isha'),
                       ],
                     ),
                   ),
@@ -561,10 +615,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildPrayerTime(String arLabel, String enLabel, String time, 
+  Widget _buildDivider() {
+    return Container(
+      width: 1,
+      height: 30,
+      color: Colors.white24,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+    );
+  }
+
+  Widget _buildPrayerTime(String prayerKey, String time, 
       {required bool isActive, required bool isUpcoming}) {
     final settings = ref.watch(settingsProvider);
-    final label = settings.language == AppLanguage.arabic ? arLabel : enLabel;
+    final prayerName = _prayerNames[prayerKey]!;
+    final label = settings.language == AppLanguage.arabic ? prayerName['ar']! : prayerName['en']!;
     
     // For active prayer - red blinking
     if (isActive) {
@@ -600,7 +664,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       );
     }
     
-    // For upcoming prayer - orange bold (static)
+    // For upcoming prayer - orange bold
     if (isUpcoming) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -629,7 +693,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       );
     }
     
-    // Normal prayer - white
+    // Normal prayer
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(

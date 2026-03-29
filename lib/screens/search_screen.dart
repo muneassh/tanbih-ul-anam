@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:tanbihulanam/providers/data_provider.dart';
+import 'package:tanbihulanam/providers/settings_provider.dart';
 import 'package:tanbihulanam/screens/reading_screen.dart';
 import 'package:tanbihulanam/models/salat_model.dart';
+import 'package:tanbihulanam/widgets/highlighted_text.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -16,6 +18,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   List<SalatModel> _searchResults = [];
   bool _isSearching = false;
+  String _currentQuery = '';
 
   @override
   void dispose() {
@@ -24,6 +27,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _performSearch(String query, List<SalatModel> allSalawat) {
+    setState(() {
+      _currentQuery = query;
+    });
+    
     if (query.isEmpty) {
       setState(() {
         _searchResults = [];
@@ -43,8 +50,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
   }
 
+  String _getLocalizedText(String ar, String en) {
+    final settings = ref.watch(settingsProvider);
+    return settings.language == AppLanguage.arabic ? ar : en;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final settings = ref.watch(settingsProvider);
+    
     return Scaffold(
       appBar: AppBar(
         title: TextField(
@@ -54,7 +68,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             color: Colors.white,
           ),
           decoration: InputDecoration(
-            hintText: 'ابحث في الصلوات...',
+            hintText: _getLocalizedText('ابحث في الصلوات...', 'Search in prayers...'),
             hintStyle: GoogleFonts.amiri(
               color: Colors.white.withOpacity(0.7),
             ),
@@ -68,6 +82,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       setState(() {
                         _searchResults = [];
                         _isSearching = false;
+                        _currentQuery = '';
                       });
                     },
                   )
@@ -102,35 +117,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 itemCount: _searchResults.length,
                 itemBuilder: (context, index) {
                   final salat = _searchResults[index];
+                  
                   return Card(
                     margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: const Color(0xFF0A5C36),
-                        child: Text(
-                          '${salat.page}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      title: Text(
-                        'صفحة ${salat.page} • رقم ${salat.id}',
-                        style: GoogleFonts.amiri(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      subtitle: Text(
-                        salat.bab.isNotEmpty ? salat.bab : 'الجزء ${salat.juz}',
-                        style: GoogleFonts.amiri(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: InkWell(
                       onTap: () {
                         Navigator.push(
                           context,
@@ -139,6 +133,79 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           ),
                         );
                       },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 50,
+                                  height: 50,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0A5C36),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      '${salat.page}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${_getLocalizedText('صفحة', 'Page')} ${salat.page} • ${_getLocalizedText('الجزء', 'Part')} ${salat.juz}',
+                                        style: GoogleFonts.amiri(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: const Color(0xFF0A5C36),
+                                        ),
+                                      ),
+                                      if (salat.bab.isNotEmpty)
+                                        Text(
+                                          salat.bab,
+                                          style: GoogleFonts.amiri(
+                                            fontSize: 12,
+                                            color: Colors.grey[600],
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: HighlightedText(
+                                text: salat.arabic,
+                                fontSize: settings.fontSize - 4,
+                                font: settings.selectedFont,
+                                isDarkMode: settings.isDarkMode,
+                                textAlign: TextAlign.right,
+                                searchQuery: _currentQuery, // Pass the search query
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -162,7 +229,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'ابحث في الصلوات',
+            _getLocalizedText('ابحث في الصلوات', 'Search in prayers'),
             style: GoogleFonts.amiri(
               fontSize: 20,
               color: Colors.grey[600],
@@ -170,7 +237,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'يمكنك البحث بكلمة أو رقم الصفحة',
+            _getLocalizedText(
+              'يمكنك البحث بكلمة أو رقم الصفحة',
+              'You can search by word or page number',
+            ),
             style: GoogleFonts.amiri(
               fontSize: 16,
               color: Colors.grey[500],
@@ -193,7 +263,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'لا توجد نتائج',
+            _getLocalizedText('لا توجد نتائج', 'No results found'),
             style: GoogleFonts.amiri(
               fontSize: 20,
               color: Colors.grey[600],
@@ -201,7 +271,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'جرب كلمات بحث أخرى',
+            _getLocalizedText('جرب كلمات بحث أخرى', 'Try different search words'),
             style: GoogleFonts.amiri(
               fontSize: 16,
               color: Colors.grey[500],

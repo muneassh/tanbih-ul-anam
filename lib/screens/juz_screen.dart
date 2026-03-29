@@ -76,7 +76,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
         _currentSalawat = juzItems;
       });
       
-      // If initialPage is provided, go to that page directly (for bookmarks)
       if (widget.initialPage != null) {
         final pageNumber = widget.initialPage!;
         SalatModel? targetSalat;
@@ -106,7 +105,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _recalculatePagination();
               
-              // Wait for PageView to be built
               Future.delayed(const Duration(milliseconds: 150), () {
                 if (mounted && _pageController.hasClients) {
                   for (int i = 0; i < _paginatedSalawat.length; i++) {
@@ -123,7 +121,6 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
           }
         }
       }
-      // If initialSalatId is provided, go directly to that salawat (for resume)
       else if (widget.initialSalatId != null) {
         final Map<String, List<SalatModel>> grouped = {};
         for (var item in juzItems) {
@@ -726,6 +723,12 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                           final firstSalat = pageSalawat.first;
                           final isPageBookmarked = _pageBookmarks.contains(_getPageKey(pageIndex));
                           
+                          // Calculate the starting global index for this page
+                          int startGlobalIndex = 0;
+                          for (int i = 0; i < pageIndex; i++) {
+                            startGlobalIndex += _paginatedSalawat[i].length;
+                          }
+                          
                           return Container(
                             color: settings.isDarkMode 
                                 ? const Color(0xFF121212) 
@@ -813,6 +816,7 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                                     itemCount: pageSalawat.length,
                                     itemBuilder: (context, salatIndex) {
                                       final salat = pageSalawat[salatIndex];
+                                      final globalSalawatNumber = startGlobalIndex + salatIndex + 1;
                                       
                                       return Container(
                                         margin: const EdgeInsets.only(bottom: 12),
@@ -820,16 +824,20 @@ class _JuzScreenState extends ConsumerState<JuzScreen> {
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
                                             Container(
-                                              width: 30,
-                                              height: 30,
+                                              width: 36,
+                                              height: 36,
                                               margin: const EdgeInsets.only(left: 4, top: 2),
                                               decoration: BoxDecoration(
                                                 color: const Color(0xFF0A5C36).withOpacity(0.1),
                                                 shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: const Color(0xFF0A5C36).withOpacity(0.3),
+                                                  width: 1,
+                                                ),
                                               ),
                                               child: Center(
                                                 child: Text(
-                                                  '${salatIndex + 1}',
+                                                  '$globalSalawatNumber',
                                                   style: TextStyle(
                                                     fontSize: 12,
                                                     fontWeight: FontWeight.bold,

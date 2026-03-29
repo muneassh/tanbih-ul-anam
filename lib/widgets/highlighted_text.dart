@@ -10,6 +10,7 @@ class HighlightedText extends ConsumerWidget {
   final bool isDarkMode;
   final TextAlign textAlign;
   final double lineHeight;
+  final String? searchQuery;
 
   const HighlightedText({
     super.key,
@@ -19,6 +20,7 @@ class HighlightedText extends ConsumerWidget {
     required this.isDarkMode,
     this.textAlign = TextAlign.center,
     this.lineHeight = 1.6,
+    this.searchQuery,
   });
 
   TextStyle _getBaseStyle() {
@@ -59,70 +61,52 @@ class HighlightedText extends ConsumerWidget {
   List<TextSpan> _buildSpans() {
     List<TextSpan> spans = [];
     
-    // Comprehensive patterns to catch ALL forms of Muhammad
-    List<String> patterns = [
-      // Basic forms with all diacritics
+    // Comprehensive patterns for Muhammad highlighting
+    List<String> muhammadPatterns = [
       'محمد',
       'مُحَمَّد',
       'مُحَمَّدٍ',
       'مُحَمَّدًا',
       'مُحَمَّدَ',
-      'مُحَمَّدٌ',
-      'مُحَمَّدُ',
-      'مُحَمَّدِ',
       'محمداً',
       'محمدٍ',
       'محمدًا',
-      'محمدٌ',
-      'محمدُ',
-      'محمدِ',
-      
-      // With different diacritic combinations
-      'مُحَمَّدْ',
-      'مُحَمَّدّ',
-      'مُحَمَّد',
-      'مُحَمَّدٍ',
-      'مُحَمَّدًا',
-      'مُحَمَّدَ',
-      'مُحَمَّدٌ',
-      'مُحَمَّدُ',
-      'مُحَمَّدِ',
-      
-      // With honorific symbols
+      'مُحَمَّدٌ',
+      'مُحَمَّدُ',
+      'مُحَمَّدِ',
       'ﷺ',
-      'محمدﷺ',
-      'مُحَمَّدﷺ',
-      'مُحَمَّدﷺ',
-      
-      // Combined with titles
-      'النبي محمد',
-      'النبي مُحَمَّد',
-      'الرسول محمد',
-      'الرسول مُحَمَّد',
-      'سيدنا محمد',
-      'سيدنا مُحَمَّد',
-      'نبينا محمد',
-      'نبينا مُحَمَّد',
-      'رسول الله محمد',
-      'رسول الله مُحَمَّد',
-      
-      // With صلی الله علیه وسلم variations
       'صلعم',
       'صلى الله عليه وسلم',
       'صلى الله عليه وآله وسلم',
       'عليه الصلاة والسلام',
       'عليه أفضل الصلاة والسلام',
+      'سيدنا محمد',
+      'نبينا محمد',
+      'رسول الله محمد',
+      'النبي محمد',
+      'الرسول محمد',
+      'حبيب الله محمد',
+      'خير الخلق محمد',
+      'خاتم الأنبياء محمد',
     ];
     
     String remainingText = text;
     TextStyle baseStyle = _getBaseStyle();
+    
+    // Create a list of all patterns to highlight
+    List<String> allPatterns = [...muhammadPatterns];
+    
+    // Add search query if provided
+    if (searchQuery != null && searchQuery!.isNotEmpty) {
+      allPatterns.add(searchQuery!);
+    }
     
     while (remainingText.isNotEmpty) {
       int earliestMatch = -1;
       String earliestPattern = '';
       
       // Find the earliest occurrence of any pattern
-      for (String pattern in patterns) {
+      for (String pattern in allPatterns) {
         int index = remainingText.indexOf(pattern);
         if (index != -1 && (earliestMatch == -1 || index < earliestMatch)) {
           earliestMatch = index;
@@ -145,17 +129,31 @@ class HighlightedText extends ConsumerWidget {
         ));
       }
       
-      // Add the highlighted pattern
+      // Determine highlight color
+      Color highlightColor;
+      Color? backgroundColor;
+      
+      if (muhammadPatterns.contains(earliestPattern)) {
+        highlightColor = Colors.red;
+        backgroundColor = Colors.red.withOpacity(0.2);
+      } else if (searchQuery != null && earliestPattern == searchQuery) {
+        highlightColor = Colors.orange;
+        backgroundColor = Colors.orange.withOpacity(0.3);
+      } else {
+        highlightColor = Colors.red;
+        backgroundColor = Colors.red.withOpacity(0.2);
+      }
+      
       spans.add(TextSpan(
         text: earliestPattern,
         style: baseStyle.copyWith(
           fontWeight: FontWeight.bold,
-          color: Colors.red,
-          fontSize: baseStyle.fontSize! * 1.05,
+          color: highlightColor,
+          backgroundColor: backgroundColor,
+          fontSize: baseStyle.fontSize! * 1.02,
         ),
       ));
       
-      // Update remaining text
       remainingText = remainingText.substring(earliestMatch + earliestPattern.length);
     }
     
@@ -164,7 +162,6 @@ class HighlightedText extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // If text is empty, return empty widget
     if (text.isEmpty) {
       return const SizedBox.shrink();
     }

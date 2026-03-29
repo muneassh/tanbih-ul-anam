@@ -11,6 +11,10 @@
         </array>
     </dict>
 </dict>
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>نحتاج إلى الموقع لتحديد أوقات الصلاة بدقة</string>
+<key>NSLocationAlwaysUsageDescription</key>
+<string>نحتاج إلى الموقع لتحديد أوقات الصلاة بدقة</string>
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
